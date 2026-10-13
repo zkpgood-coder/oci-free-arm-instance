@@ -26,77 +26,26 @@ jobs:
           region=${{ secrets.OCI_CLI_REGION }}
           key_file=~/.oci/oci_api_key.pem
           EOF
+          export SUPPRESS_LABEL_WARNING=True
+          export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
 
-      - name: Diagnose parameters
+      - name: List Ubuntu images
         run: |
-          echo "=== Compartment ==="
-          echo "${{ secrets.OCI_COMPARTMENT_ID }}"
-          echo "=== AD Name (secret) ==="
-          echo "${{ secrets.AD_NAME }}"
-          echo "=== Actual ADs in tenancy ==="
-          oci iam availability-domain list --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" 2>&1 | head -30
-          echo "=== Image ==="
-          echo "${{ secrets.IMAGE_ID }}"
-          echo "=== Subnet ==="
-          echo "${{ secrets.OCI_SUBNET_ID }}"
-
-      - name: Try to create ARM instance
-        id: create
-        run: |
-          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
-          # 自动查找最新的 Canonical Ubuntu 24.04 Minimal aarch64 镜像
-          echo "=== 查找镜像 ==="
+          export SUPPRESS_LABEL_WARNING=True
+          export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
           oci compute image list \
             --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" \
             --operating-system "Canonical Ubuntu" \
             --shape "VM.Standard.A1.Flex" \
-            --limit 20 2>&1 | python3 -c "
+            --limit 30 2>&1 | python3 -c "
           import json,sys
-          try:
-              data=json.load(sys.stdin)['data']
-              print(f'找到 {len(data)} 个镜像', file=sys.stderr)
-              for img in data:
-                  name=img.get('display-name','')
-                  print(f'  - {name}', file=sys.stderr)
-                  if 'Minimal' in name and 'aarch64' in name and '24.04' in name:
-                      print(img['id'])
-                      break
-          except Exception as e:
-              print(f'解析失败: {e}', file=sys.stderr)
-          " > /tmp/image_id.txt 2> /tmp/image_debug.log
-          cat /tmp/image_debug.log
-          IMAGE_ID=$(cat /tmp/image_id.txt)
-          echo "Using image: $IMAGE_ID"
-          if [ -z "$IMAGE_ID" ]; then
-            echo "❌ 找不到镜像，查看上面的调试输出"
-            exit 1
-          fi
-          oci compute instance launch \
-            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
-            --availability-domain "${{ secrets.AD_NAME }}" \
-            --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
-            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --image-id "$IMAGE_ID" \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --boot-volume-size-in-gbs 200 \
-            --display-name "arm-instance-200g" \
-            --assign-public-ip true \
-            --wait-for-state RUNNING \
-            --max-wait-seconds 120 2>&1 | tee /tmp/create.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "success=true" >> $GITHUB_OUTPUT
-            echo "✅ 实例创建成功！"
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
-            echo "❌ 创建失败，10分钟后重试"
-            cat /tmp/create.log
-          fi
-
-      - name: Report result
-        run: |
-          if [ "${{ steps.create.outputs.success }}" = "true" ]; then
-            echo "🎉 ARM 实例已创建！请立即去 GitHub 禁用此 workflow，避免重复创建。"
-          else
-            echo "⏳ 本次未抢到，等待下次自动重试。"
-          fi
+          d = json.load(sys.stdin)
+          print('=== 找到的镜像 ===')
+          for img in d['data']:
+              name = img.get('display-name', '')
+              if '24.04' in name and 'aarch64' in name:
+                  print(name)
+                  print('  OCID:', img['id'])
+                  print('  时间:', img.get('time-created', ''))
+                  print()
+          "
