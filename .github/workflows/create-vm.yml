@@ -1,0 +1,62 @@
+name: Try to Create OCI VM
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  try-create-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          pip install oci-cli
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_CLI_USER }}
+          fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}
+          tenancy=${{ secrets.OCI_CLI_TENANCY }}
+          region=${{ secrets.OCI_CLI_REGION }}
+          key_file=~/.oci/oci_api_key.pem
+          EOF
+
+      - name: Try to create ARM instance
+        id: create
+        run: |
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+          oci compute instance launch \
+            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+            --availability-domain "${{ secrets.AD_NAME }}" \
+            --shape "VM.Standard.A1.Flex" \
+            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+            --image-id "${{ secrets.IMAGE_ID }}" \
+            --ssh-authorized-keys-file /tmp/ssh_key.pub \
+            --boot-volume-size-in-gbs 200 \
+            --display-name "arm-instance-200g" \
+            --assign-public-ip true \
+            --wait-for-state RUNNING \
+            --max-wait-seconds 120 2>&1 | tee /tmp/create.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "✅ 实例创建成功！"
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "❌ 创建失败，10分钟后重试"
+            cat /tmp/create.log
+          fi
+
+      - name: Report result
+        run: |
+          if [ "${{ steps.create.outputs.success }}" = "true" ]; then
+            echo "🎉 ARM 实例已创建！请立即去 GitHub 禁用此 workflow，避免重复创建。"
+          else
+            echo "⏳ 本次未抢到，等待下次自动重试。"
+          fi
