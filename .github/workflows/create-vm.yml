@@ -27,6 +27,19 @@ jobs:
           key_file=~/.oci/oci_api_key.pem
           EOF
 
+      - name: Diagnose parameters
+        run: |
+          echo "=== Compartment ==="
+          echo "${{ secrets.OCI_COMPARTMENT_ID }}"
+          echo "=== AD Name (secret) ==="
+          echo "${{ secrets.AD_NAME }}"
+          echo "=== Actual ADs in tenancy ==="
+          oci iam availability-domain list --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" 2>&1 | head -30
+          echo "=== Image ==="
+          echo "${{ secrets.IMAGE_ID }}"
+          echo "=== Subnet ==="
+          echo "${{ secrets.OCI_SUBNET_ID }}"
+
       - name: Try to create ARM instance
         id: create
         run: |
