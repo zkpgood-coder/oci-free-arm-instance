@@ -45,25 +45,30 @@ jobs:
         run: |
           echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
           # 自动查找最新的 Canonical Ubuntu 24.04 Minimal aarch64 镜像
-          IMAGE_ID=$(oci compute image list \
+          echo "=== 查找镜像 ==="
+          oci compute image list \
             --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" \
             --operating-system "Canonical Ubuntu" \
-            --operating-system-version "24.04" \
             --shape "VM.Standard.A1.Flex" \
-            --sort-by TIMECREATED --sort-order DESC \
-            --limit 10 2>/dev/null | python3 -c "
+            --limit 20 2>&1 | python3 -c "
           import json,sys
-          data=json.load(sys.stdin)['data']
-          # 找 Minimal aarch64 版本
-          for img in data:
-              name=img.get('display-name','')
-              if 'Minimal' in name and 'aarch64' in name:
-                  print(img['id'])
-                  break
-          ")
+          try:
+              data=json.load(sys.stdin)['data']
+              print(f'找到 {len(data)} 个镜像', file=sys.stderr)
+              for img in data:
+                  name=img.get('display-name','')
+                  print(f'  - {name}', file=sys.stderr)
+                  if 'Minimal' in name and 'aarch64' in name and '24.04' in name:
+                      print(img['id'])
+                      break
+          except Exception as e:
+              print(f'解析失败: {e}', file=sys.stderr)
+          " > /tmp/image_id.txt 2> /tmp/image_debug.log
+          cat /tmp/image_debug.log
+          IMAGE_ID=$(cat /tmp/image_id.txt)
           echo "Using image: $IMAGE_ID"
           if [ -z "$IMAGE_ID" ]; then
-            echo "❌ 找不到镜像"
+            echo "❌ 找不到镜像，查看上面的调试输出"
             exit 1
           fi
           oci compute instance launch \
