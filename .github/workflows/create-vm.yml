@@ -29,23 +29,62 @@ jobs:
           export SUPPRESS_LABEL_WARNING=True
           export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
 
-      - name: List Ubuntu images
+      - name: Try to create ARM instance
+        id: create
         run: |
           export SUPPRESS_LABEL_WARNING=True
           export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True
-          oci compute image list \
+          echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+
+          # 查找最新的 Canonical Ubuntu 24.04 Minimal aarch64 镜像
+          IMAGE_ID=$(oci compute image list \
             --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" \
             --operating-system "Canonical Ubuntu" \
             --shape "VM.Standard.A1.Flex" \
-            --limit 30 2>&1 | python3 -c "
-          import json,sys
+            --limit 30 2>/dev/null | python3 -c "
+          import json, sys
           d = json.load(sys.stdin)
-          print('=== 找到的镜像 ===')
+          best = None
           for img in d['data']:
-              name = img.get('display-name', '')
-              if '24.04' in name and 'aarch64' in name:
-                  print(name)
-                  print('  OCID:', img['id'])
-                  print('  时间:', img.get('time-created', ''))
-                  print()
-          "
+              n = img.get('display-name', '')
+              if '24.04' in n and 'Minimal' in n and 'aarch64' in n:
+                  if best is None or img.get('time-created','') > best.get('time-created',''):
+                      best = img
+          if best:
+              print(best['id'])
+          ")
+          echo "镜像: $IMAGE_ID"
+          if [ -z "$IMAGE_ID" ]; then
+            echo "❌ 找不到 Ubuntu 24.04 Minimal aarch64 镜像"
+            exit 1
+          fi
+
+          oci compute instance launch \
+            --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
+            --availability-domain "${{ secrets.AD_NAME }}" \
+            --shape "VM.Standard.A1.Flex" \
+            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+            --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
+            --image-id "$IMAGE_ID" \
+            --ssh-authorized-keys-file /tmp/ssh_key.pub \
+            --boot-volume-size-in-gbs 200 \
+            --display-name "arm-instance-200g" \
+            --assign-public-ip true \
+            --wait-for-state RUNNING \
+            --max-wait-seconds 120 2>&1 | tee /tmp/create.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "✅ 实例创建成功！"
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "❌ 创建失败，10分钟后重试"
+            cat /tmp/create.log
+          fi
+
+      - name: Report result
+        run: |
+          if [ "${{ steps.create.outputs.success }}" = "true" ]; then
+            echo "🎉 ARM 实例已创建！请立即去 GitHub 禁用此 workflow，避免重复创建。"
+          else
+            echo "⏳ 本次未抢到，等待下次自动重试。"
+          fi
