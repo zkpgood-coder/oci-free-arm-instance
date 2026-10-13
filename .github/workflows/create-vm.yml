@@ -44,13 +44,35 @@ jobs:
         id: create
         run: |
           echo "${{ secrets.SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
+          # 自动查找最新的 Canonical Ubuntu 24.04 Minimal aarch64 镜像
+          IMAGE_ID=$(oci compute image list \
+            --compartment-id "${{ secrets.OCI_CLI_TENANCY }}" \
+            --operating-system "Canonical Ubuntu" \
+            --operating-system-version "24.04" \
+            --shape "VM.Standard.A1.Flex" \
+            --sort-by TIMECREATED --sort-order DESC \
+            --limit 10 2>/dev/null | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)['data']
+          # 找 Minimal aarch64 版本
+          for img in data:
+              name=img.get('display-name','')
+              if 'Minimal' in name and 'aarch64' in name:
+                  print(img['id'])
+                  break
+          ")
+          echo "Using image: $IMAGE_ID"
+          if [ -z "$IMAGE_ID" ]; then
+            echo "❌ 找不到镜像"
+            exit 1
+          fi
           oci compute instance launch \
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
             --availability-domain "${{ secrets.AD_NAME }}" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGBs":24}' \
             --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
-            --image-id "${{ secrets.IMAGE_ID }}" \
+            --image-id "$IMAGE_ID" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
             --boot-volume-size-in-gbs 200 \
             --display-name "arm-instance-200g" \
