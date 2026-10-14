@@ -63,12 +63,12 @@ jobs:
             --compartment-id "${{ secrets.OCI_COMPARTMENT_ID }}" \
             --availability-domain "${{ secrets.AD_NAME }}" \
             --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+            --shape-config '{"ocpus":2,"memoryInGBs":12}' \
             --subnet-id "${{ secrets.OCI_SUBNET_ID }}" \
             --image-id "$IMAGE_ID" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --boot-volume-size-in-gbs 200 \
-            --display-name "arm-instance-200g" \
+            --boot-volume-size-in-gbs 50 \
+            --display-name "arm-instance" \
             --assign-public-ip true \
             --wait-for-state RUNNING \
             --max-wait-seconds 120 2>&1 | tee /tmp/create.log
